@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fraud Detection MLOps Pipeline</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 40px 24px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #58a6ff, #a371f7, #f78166);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+
+    header p {
+      margin-top: 10px;
+      color: #8b949e;
+      font-size: 0.95rem;
+    }
+
+    .diagram-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 16px;
+      padding: 36px;
+      max-width: 1400px;
+      margin: 0 auto 48px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      overflow-x: auto;
+    }
+
+    .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+
+    /* ── Summary table ─────────────────────────────────────── */
+    .summary {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .summary h2 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #58a6ff;
+      margin-bottom: 20px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 20px 24px;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .card:hover {
+      border-color: #58a6ff55;
+      transform: translateY(-2px);
+    }
+
+    .card-icon {
+      font-size: 1.5rem;
+      margin-bottom: 10px;
+    }
+
+    .card-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 6px;
+      color: #e6edf3;
+    }
+
+    .card-body {
+      font-size: 0.82rem;
+      color: #8b949e;
+      line-height: 1.6;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .badge-red {
+      background: #ff000022;
+      color: #f78166;
+      border: 1px solid #f7816655;
+    }
+
+    .badge-yellow {
+      background: #ffa50022;
+      color: #e3b341;
+      border: 1px solid #e3b34155;
+    }
+
+    .badge-green {
+      background: #00ff0022;
+      color: #3fb950;
+      border: 1px solid #3fb95055;
+    }
+
+    .badge-blue {
+      background: #0078ff22;
+      color: #58a6ff;
+      border: 1px solid #58a6ff55;
+    }
+
+    .badge-purple {
+      background: #8957e522;
+      color: #a371f7;
+      border: 1px solid #a371f755;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 48px;
+      color: #484f58;
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <h1>Fraud Detection MLOps Pipeline</h1>
+    <p>End-to-end architecture · Training · Serving · Monitoring · Automated Retraining</p>
+  </header>
+
+  <!-- ── Full Pipeline Diagram ─────────────────────────────── -->
+  <div class="diagram-card">
+    <div class="mermaid">
+      %%{init: {"theme": "dark", "themeVariables":
+      {"primaryColor":"#1f2937","primaryTextColor":"#e6edf3","primaryBorderColor":"#374151","lineColor":"#58a6ff","secondaryColor":"#111827","tertiaryColor":"#0d1117","fontSize":"13px"},
+      "flowchart": {"curve":"basis"}}}%%
+      flowchart TD
+      %% DATA SOURCES
+      subgraph SOURCES["📦 Data Sources"]
+      CSV["🗂️ CSV Files"]
+      PG_SRC["🐘 PostgreSQL\ntransactions table"]
+      BQ["☁️ BigQuery"]
+      end
+
+      %% INITIAL TRAINING
+      subgraph TRAIN["Initial Training · main.py · Prefect"]
+      direction TB
+      EXT["extraction.py\nCSVExtractor / PostgresExtractor / BigQueryExtractor"]
+      FE["FeatureEngineer\nclean · log transform · time features · interaction terms"]
+      PRE["Preprocessor\ntrain/val/test split → SMOTE on train only"]
+      TR["Trainer\nRandomForest · XGBoost · LogisticRegression\nall logged to MLflow"]
+      TUNE["Optuna Tuner\n50 trials · optional via do_tuning=True"]
+      VAL["Validator\nROC-AUC · F1 · Precision · Recall"]
+      PROMOTE["MLflow\nPromote best model → 'production' alias\nSave previous → 'previous-production'"]
+      end
+
+      CSV & PG_SRC & BQ --> EXT
+      EXT --> FE --> PRE --> TR --> TUNE --> VAL --> PROMOTE
+
+      %% STORAGE
+      subgraph STORAGE["Storage Layer"]
+      MINIO["MinIO S3-compatible\nmodels · preprocessor · reference_data.parquet"]
+      MLFLOW["MLflow\nExperiment tracking · Model registry\nproduction · previous-production aliases"]
+      PGDB["PostgreSQL\ntransactions · predictions · fraud_feedback"]
+      end
+
+      TR -->|"save model + preprocessor"| MINIO
+      TR -->|"log runs · metrics · artifacts"| MLFLOW
+      PROMOTE -->|"set alias"| MLFLOW
+
+      %% SERVING
+      subgraph API["Serving · app.py · FastAPI"]
+      direction TB
+      STARTUP["lifespan startup\nLoad model + preprocessor from MinIO\nLaunch background reload loop"]
+      BG["Background reload loop\nPoll MLflow every 5 min\nSilent reload if new production alias"]
+      PREDICT["POST /predict\nFeatureEngineer input → model.predict + predict_proba\nLog prediction + confidence → DB"]
+      MONITOR_EP["POST /monitor on-demand\nFeatureEngineer ref + current\nDriftMonitor.run()"]
+      HEALTH["GET /health\nmodel · version · reload interval"]
+      end
+
+      MINIO -->|"load at startup"| STARTUP
+      MLFLOW -->|"check alias"| BG
+      BG -.->|"new version detected → reload"| STARTUP
+      PREDICT -->|"write prediction + confidence"| PGDB
+
+      %% DAILY MONITORING
+      subgraph MONITOR["Daily Monitoring · 9am daily · Prefect"]
+      direction TB
+      REF["load_reference()\nfrom MinIO"]
+      CURR["load_current()\nfrom PostgreSQL + FeatureEngineer"]
+      SCORE["score_for_drift()\nRun prod model on both datasets\nAdd predicted_fraud column"]
+      PERF["load_performance_data()\nJoin predictions + fraud_feedback\nOption B — self-activates on first feedback
+      row"]
+      DRIFT["DriftMonitor.run()\n─────────────────────────\nLayer 1 DataDriftPreset\n feature distribution shift\nLayer
+      2 ColumnDriftMetric\n prediction output drift\nLayer 3 ClassificationPreset\n recall · precision · F1 drift"]
+      SEV["Severity Classification\n🔴 serious ≥50% features OR pred drift OR recall lt 0.70\n🟡 negligible 15–49%
+      features no pred drift\n🟢 none less than 15% drifted"]
+      end
+
+      MINIO -->|"reference_data.parquet"| REF
+      PGDB -->|"last 24h transactions"| CURR
+      PGDB -->|"join predictions + feedback"| PERF
+      MLFLOW & MINIO -->|"load prod model + preprocessor"| SCORE
+      REF & CURR --> SCORE --> DRIFT
+      PERF --> DRIFT
+      DRIFT --> SEV
+
+      %% TIERED RESPONSE
+      subgraph RESPONSE["Tiered Response"]
+      TRIG_NOW["🔴 Serious\nCreate Prefect flow run immediately\ntrigger_reason: serious_drift"]
+      WAIT["🟡 Negligible\nNo immediate trigger\nSunday cron handles it"]
+      OK_NODE["🟢 None\nNo action needed"]
+      SLACK["notify_slack()\nAlerts team for ALL outcomes\nvia Slack Incoming Webhook"]
+      end
+
+      SEV -->|"serious"| TRIG_NOW
+      SEV -->|"negligible"| WAIT
+      SEV -->|"none"| OK_NODE
+      SEV --> SLACK
+
+      %% RETRAINING
+      subgraph RETRAIN["🔁 Retraining Pipeline · retrain_flow.py · Prefect"]
+      direction TB
+      R_EXT["retrain_extract()"]
+      R_FE["retrain_feature_engineer()"]
+      R_PRE["retrain_preprocess()\nSMOTE on train only"]
+      R_TR["retrain_train()\n3 models · MLflow logged"]
+      R_VAL["retrain_validate_and_promote()\nBest model → production alias"]
+      R_REF["update_reference_data()\nSave new training data to MinIO\nOnly after successful promotion"]
+      end
+
+      TRIG_NOW -->|"immediate"| R_EXT
+      WAIT -.->|"every Sunday midnight"| R_EXT
+      R_EXT --> R_FE --> R_PRE --> R_TR --> R_VAL --> R_REF
+      R_VAL -->|"new production alias"| MLFLOW
+      R_REF -->|"overwrite reference_data.parquet"| MINIO
+
+      %% FEEDBACK LOOP
+      subgraph FEEDBACK["🔄 Option B Feedback Loop"]
+      CHARGEBACK["Chargebacks\npayment processor webhook"]
+      DISPUTE["Customer disputes\napp / bank report"]
+      MANUAL["Fraud analyst\nmanual review"]
+      end
+
+      CHARGEBACK & DISPUTE & MANUAL -->|"confirmed fraud label"| PGDB
+
+      %% INFRASTRUCTURE
+      subgraph INFRA["Infrastructure · Docker Compose"]
+      direction LR
+      PROM["Prometheus\n/metrics scrape"]
+      GRAF["Grafana\ndashboards"]
+      PREFECT_SRV["Prefect Server + Worker\norchestrates all flows"]
+      end
+
+      PROM --> GRAF
+      PREFECT_SRV -->|"schedules + runs"| MONITOR & RETRAIN & TRAIN
+    </div>
+  </div>
+
+  <!-- ── Summary Cards ──────────────────────────────────────── -->
+  <div class="summary">
+    <h2>Pipeline Components at a Glance</h2>
+    <div class="cards">
+
+      <div class="card">
+        <div class="card-icon"></div>
+        <div class="badge badge-blue">Training</div>
+        <div class="card-title">Initial Training Pipeline</div>
+        <div class="card-body">Extract → Feature Engineering → SMOTE balancing → Train 3 models (RF, XGBoost, LR) →
+          Validate → Promote best to MLflow <code>production</code> alias. Optuna hyperparameter tuning available via
+          <code>do_tuning=True</code>.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-icon"></div>
+        <div class="badge badge-blue">Serving</div>
+        <div class="card-title">FastAPI Inference Server</div>
+        <div class="card-body">Model loaded at startup via FastAPI <code>lifespan</code>. Background task polls MLflow
+          every 5 min and reloads silently when a new model is promoted — no user request ever waits for a download.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-icon"></div>
+        <div class="badge badge-purple">Monitoring</div>
+        <div class="card-title">Three-Layer Drift Monitoring</div>
+        <div class="card-body">
+          <strong>Layer 1</strong> — Feature drift (DataDriftPreset)<br>
+          <strong>Layer 2</strong> — Prediction drift (ColumnDriftMetric)<br>
+          <strong>Layer 3</strong> — Performance drift via ClassificationPreset (self-activates on first customer
+          feedback row)
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-icon"></div>
+        <div class="badge badge-red">Retraining</div>
+        <div class="card-title">Tiered Retraining Response</div>
+        <div class="card-body">
+          <span class="badge badge-red">🔴 Serious</span> ≥50% features OR prediction drift OR recall &lt;70% →
+          <strong>retrain immediately</strong><br><br>
+          <span class="badge badge-yellow">🟡 Negligible</span> 15–49% features → <strong>Sunday midnight
+            schedule</strong><br><br>
+          <span class="badge badge-green">🟢 None</span> &lt;15% drifted → no action
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-icon"></div>
+        <div class="badge badge-purple">Alerts</div>
+        <div class="card-title">Slack Notifications</div>
+        <div class="card-body">Team is notified on every daily monitoring run regardless of outcome. Messages include
+          drift score, prediction drift status, model performance metrics, and whether retraining was triggered.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">🔄</div>
+        <div class="badge badge-green">Feedback</div>
+        <div class="card-title">Option B — Performance Monitoring</div>
+        <div class="card-body">Every prediction is logged to a <code>predictions</code> table. When chargebacks/disputes
+          populate <code>fraud_feedback</code>, <code>ClassificationPreset</code> activates automatically — no code
+          changes needed.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-icon"></div>
+        <div class="badge badge-blue">Storage</div>
+        <div class="card-title">Persistent Storage Layer</div>
+        <div class="card-body"><strong>MinIO</strong> — models, preprocessor, reference
+          baseline<br><strong>MLflow</strong> — experiments, model registry, aliases<br><strong>PostgreSQL</strong> —
+          transactions, predictions, fraud feedback</div>
+      </div>
+
+      <div class="card">
+        <div class="card-icon"></div>
+        <div class="badge badge-blue">Infrastructure</div>
+        <div class="card-title">Docker Compose Stack</div>
+        <div class="card-body">PostgreSQL · MinIO · MLflow Server · Prefect Server + Worker · FastAPI · Prometheus ·
+          Grafana. All services health-checked with proper dependency ordering.</div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer>
+    <p>Fraud Detection MLOps System · Built with Prefect · MLflow · Evidently · FastAPI · MinIO</p>
+  </footer>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        primaryColor: '#1f2937',
+        primaryTextColor: '#e6edf3',
+        primaryBorderColor: '#374151',
+        lineColor: '#58a6ff',
+        secondaryColor: '#111827',
+        tertiaryColor: '#0d1117',
+        fontSize: '13px'
+      },
+      flowchart: { curve: 'basis', padding: 20 }
+    });
+  </script>
+</body>
+
+</html>
