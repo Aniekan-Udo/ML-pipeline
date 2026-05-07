@@ -1,0 +1,13 @@
+@"
+.venv
+__pycache__
+*.pyc
+*.pyo
+.git
+.env
+fraud_transactions.csv
+*.csv
+results/
+.pytest_cache
+*.log
+"@ | Out-File -FilePath .dockerignore -Encoding utf8NoBOM

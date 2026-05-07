@@ -139,6 +139,8 @@ That said, this system was architected so that every tool is swappable. A startu
 | Explaining individual predictions | **SHAP** | Regulator-ready explainability for every decision |
 | Storing transaction and prediction logs | **PostgreSQL** | Enterprise relational database, ACID-compliant |
 | Running all services consistently | **Docker + Docker Compose** | Reproducible, portable, cloud-agnostic infrastructure |
+| Provisioning cloud infrastructure | **Terraform** | Infrastructure as code — GCS bucket and BigQuery dataset version-controlled and reproducible |
+| Cloud data lake & warehouse | **GCS + BigQuery** | Scalable object storage and serverless SQL analytics on GCP |
 | Alerting and incident management | **Slack + PagerDuty** | Real-time team alerts and on-call escalation |
 
 ---
@@ -156,6 +158,7 @@ That said, this system was architected so that every tool is swappable. A startu
 | Explaining individual predictions | **SHAP** *(unchanged - it's already free)* | - |
 | Storing transaction and prediction logs | **SQLite** | No database server - a local file handles early-stage volumes |
 | Running all services consistently | **Docker** *(optional)* | Can run locally without containers at small scale |
+| Provisioning cloud infrastructure | **Manual GCP Console setup** | Skip IaC entirely at early stage — create buckets and datasets by hand |
 | Alerting | **Slack Webhook** | Free Slack alerts with no PagerDuty subscription needed |
 
 The architecture was designed with this swap in mind from the start. The pipeline never depends directly on any specific tool - it depends on an interface, and the tool sits behind that interface. Swapping MinIO for S3, or Prefect for a cron job, is a one-file change. Nothing in the core fraud detection logic changes at all.
@@ -177,6 +180,53 @@ Every training run is logged with:
 - The git commit hash of the code
 
 This means the system is audit-ready out of the box. Any regulator question about any decision at any point in time can be answered from the logs.
+
+---
+
+## Cloud Infrastructure (Terraform)
+
+The GCP data landing zone — the GCS bucket and BigQuery dataset that feed the extraction pipeline — is fully provisioned via Terraform. Infrastructure is version-controlled, reproducible, and can be torn down and rebuilt in under a minute.
+
+**What Terraform provisions:**
+
+| Resource | Name | Purpose |
+|---|---|---|
+| GCS Bucket | `fraud-detection-489008-bucket` | Stores raw CSV uploads before BigQuery ingestion |
+| GCS Object | `fraud-data/fraud_transactions.csv` | Uploads the transaction dataset directly from local path |
+| BigQuery Dataset | `fraud_dataset` | Landing zone for transaction data queried by `extraction.py` |
+
+**To provision the infrastructure:**
+
+```bash
+cd terraform/
+terraform init
+terraform apply
+```
+
+**To load the CSV from GCS into BigQuery after provisioning:**
+
+```bash
+bq load \
+  --source_format=CSV \
+  --skip_leading_rows=1 \
+  --autodetect \
+  fraud_dataset.transactions \
+  gs://fraud-detection-489008-bucket/fraud-data/fraud_transactions.csv
+```
+
+Once loaded, the extraction pipeline can query `fraud_dataset.transactions` directly via the BigQuery extractor in `extraction.py` — no further configuration needed.
+
+**Data flow through the infrastructure:**
+
+```
+fraud_transactions.csv
+        ↓  (Terraform uploads)
+GCS Bucket
+        ↓  (bq load)
+BigQuery — fraud_dataset.transactions
+        ↓  (extraction.py BigQuery extractor)
+Preprocessing → Training → MLflow → MinIO → /predict API
+```
 
 ---
 
@@ -202,6 +252,8 @@ No specialised infrastructure required beyond a server that can run Docker.
 - [x] Full audit logging
 - [x] Slack and PagerDuty alerting
 - [x] 120+ test suite covering all critical failure modes
+- [x] Cloud infrastructure provisioned via Terraform (GCS + BigQuery)
+- [x] Load tested to 15,000 concurrent users via Locust
 - [ ] Grafana dashboard for live fraud metrics
 - [ ] CI/CD pipeline via GitHub Actions
 - [ ] A/B testing framework for model comparison in production
@@ -236,7 +288,6 @@ It reflects the kind of engineering that most ML teams build *after* their first
 
 ---
 
-*Built with Python 3.11 · Tested across 120+ scenarios · Deployable in under 10 minutes*
+*Built with Python 3.11 · Tested across 120+ scenarios · Infrastructure as Code via Terraform · Load tested to 15,000 concurrent users · Deployable in under 10 minutes*
 
 ---
-

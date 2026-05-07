@@ -178,7 +178,7 @@ def predict(request: PredictionRequest):
         return {
             "prediction":    predictions.tolist(),
             "confidence":    confidence_scores.tolist(),
-            "explanation":   explanation,               # ← SHAP reasons
+            "explanation":   explanation,              
             "model_used":    current_model_name,
             "model_version": current_model_version,
         }
@@ -191,8 +191,6 @@ def predict(request: PredictionRequest):
 def run_monitor(request: MonitorRequest):
     """
     On-demand drift check.
-    Uses the same functions as the daily Prefect monitoring flow —
-    no DriftMonitor class needed, Evidently IS the abstraction.
     """
     try:
         from preprocessing import FeatureEngineer

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import pandas as pd
 import numpy as np
 import logging
-import pandera as pa
+import pandera.pandas as pa
 from pandera import Column, DataFrameSchema, Check
 from sklearn.model_selection import train_test_split
 
@@ -26,8 +26,8 @@ raw_transaction_schema = DataFrameSchema(
         ),
         "device_type": Column(
             str,
-            checks=Check.isin(["mobile", "desktop", "tablet"],
-                              error="device_type must be mobile, desktop, or tablet"),
+            checks=Check.isin(["mobile", "desktop", "tablet", "pos_terminal"],
+                              error="device_type must be mobile, desktop, tablet or pos_terminal"),
             nullable=False,
         ),
         "is_fraud": Column(
@@ -133,7 +133,7 @@ class FeatureEngineer(FeatureEngineerPort):
             raise
 
     def cleaning(self, amount_col: str = 'transaction_amount') -> pd.DataFrame:
-        self._validate_raw()                         # ← validate before cleaning
+        self._validate_raw()                        
 
         self.df = self.df.drop_duplicates()
         self.df = self.df.dropna(how="all")
@@ -159,7 +159,7 @@ class FeatureEngineer(FeatureEngineerPort):
         self.df['amount_by_device'] = self.df['transaction_amount'] * (
             self.df['device_type'] == 'mobile').astype(int)
 
-        self._validate_engineered()                  # ← validate after engineering
+        self._validate_engineered()                  
         return self.df
 
 

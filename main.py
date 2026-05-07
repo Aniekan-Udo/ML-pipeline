@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Any
 
+from dotenv import load_dotenv
+load_dotenv()
+
 class PipelineConfig(BaseModel):
     """
     Validated pipeline configuration.
@@ -92,8 +95,7 @@ def preprocess(df, target_col):
         target_col=target_col
     )
     feature_names = preprocessor.get_feature_names_out()
-    # NOTE: SMOTE is already applied inside preprocessor.run() â€” do NOT call inbalance_handling() again here.
-
+   
     # Upload preprocessor to MinIO and log the URI as an MLflow artifact reference
     with mlflow.start_run(run_name="preprocessor"):
         uri = save(preprocessor, preprocessor_key())
@@ -190,11 +192,11 @@ def version_data(df, source: str):
         # Save extracted data locally first, then version it
         df.to_csv("data/transactions.csv", index=False)
     
-    subprocess.run(["dvc", "add", "data/transactions.csv"])
-    subprocess.run(["git", "add", "data/transactions.csv.dvc"])
+    subprocess.run(["dvc", "add", "data/transactions.csv"], shell=True)
+    subprocess.run(["git", "add", "data/transactions.csv.dvc"], shell=True)
     subprocess.run(["git", "commit", "-m",
         f"auto-version: {source} snapshot {datetime.now().isoformat()}"])
-    subprocess.run(["dvc", "push"])
+    subprocess.run(["dvc", "push"], shell=True)
 
 
 @flow(name="ML Data Pipeline")
@@ -224,9 +226,10 @@ def run_pipeline(
     mlflow.set_tracking_uri(config.mlflow_uri)
     
     model_factory = ModelFactory()
-    version_data()
+    #version_data()
 
     df = extract(extractor, query, **kwargs)
+    
     version_data(df, source=extractor.source)
     df = feature_engineer(df)
 
@@ -241,7 +244,7 @@ def run_pipeline(
             best, X_train, y_train, X_val, y_val
         )
 
-    predictions = evaluate(best, preprocessor, X_test)
+    predictions = evaluate(best, X_test)
     return best, preprocessor, predictions, results, best_params, tuned_model
 
 
@@ -267,18 +270,22 @@ if __name__ == "__main__":
     # )
 
     # --- Option 3: BigQuery ---
-    # best, preprocessor = run_pipeline(
-    #     extractor=BigQueryExtractor(
-    #         project_id="my-gcp-project",
-    #         dataset="ml_dataset"
-    #     ),
-    #     query="""
-    #         SELECT user_id, amount, label
-    #         FROM `my-gcp-project.ml_dataset.transactions`
-    #         WHERE DATE(created_at) >= '2024-01-01'
-    #         LIMIT 1000000
-    #     """,
-    #     target_col="is_fraud"
-    # )
+    run_pipeline(
+            extractor=BigQueryExtractor(
+        project_id="fraud-detection-495412",
+        dataset="fraud_dataset",
+        location="US"
+        ),
 
-    print("Swap any extractor Ã¢â‚¬â€ the pipeline code never changes.")
+        query="""
+            SELECT * FROM `fraud-detection-495412.fraud_dataset.transactions`
+        """,
+
+        target_col="is_fraud",
+        
+    )
+
+    
+    
+    
+

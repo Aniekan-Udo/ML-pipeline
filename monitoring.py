@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from evidently.report import Report
 from evidently.metric_preset import DataDriftPreset, ClassificationPreset
 from evidently.metrics import ColumnDriftMetric
-from evidently import ColumnMapping
+from evidently.pipeline.column_mapping import ColumnMapping
 
 from minio_storage import StorageSingleton, preprocessor_key, model_key
 
