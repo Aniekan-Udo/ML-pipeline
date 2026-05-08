@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 import logging
 
-from minio_storage import StorageSingleton, model_key, preprocessor_key
-from preprocessing import FeatureEngineer
+from minio_storage import StorageSingleton, model_key, preprocessor_key, clip_boundary_key
+from preprocessing import InferenceFeatureEngineer 
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ class Inference(InferencePort):
         self._model        = None           # lazy loaded
         self._preprocessor = None           # lazy loaded
         self._explainer    = None           # lazy loaded; _EXPLAINER_MISSING if not found
+        self._clip_bounds  = None           # lazy loaded
 
     # ── Lazy loaders — load once, cache forever ───────────────────────────────
 
@@ -109,6 +110,18 @@ class Inference(InferencePort):
             return None
         return self._explainer
 
+    @property
+    def clip_bounds(self):
+        if self._clip_bounds is None:
+            try:
+                logger.info("Loading clip bounds")
+                from minio_storage import clip_boundary_key
+                self._clip_bounds = StorageSingleton.get().load(clip_boundary_key())
+            except Exception as e:
+                logger.warning(f"Clip bounds not found in MinIO: {e}. Using fallback (no clipping).")
+                self._clip_bounds = {"lower": 0.0, "upper": float('inf')}
+        return self._clip_bounds
+
     # ── Internal transform ────────────────────────────────────────────────────
 
     def _transform(self, new_data: pd.DataFrame):
@@ -117,7 +130,7 @@ class Inference(InferencePort):
         if sp.issparse(new_data) or isinstance(new_data, np.ndarray):
             return new_data
 
-        fe = FeatureEngineer(new_data)
+        fe = InferenceFeatureEngineer(new_data, clip_bounds=self.clip_bounds)
         fe.cleaning()
         fe.transform()
         return self.preprocessor.transform(fe.df)

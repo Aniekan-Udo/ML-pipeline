@@ -3,6 +3,8 @@ volumes:
   minio-data:
   shared-artifacts:
   grafana-data:
+  rabbitmq-data:
+  redis-data:
 
 networks:
   ml-network:
@@ -89,6 +91,39 @@ services:
     networks:
       - ml-network
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"    # AMQP broker port — Celery connects here
+      - "15672:15672"  # RabbitMQ management UI — http://localhost:15672
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - ml-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"    # Redis port — Celery result backend connects here
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes   # persist data to disk
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks:
+      - ml-network
+
   prefect-server:
     image: prefecthq/prefect:3-latest
     ports:
@@ -133,6 +168,29 @@ services:
     networks:
       - ml-network
 
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: celery -A celery_app.celery worker --loglevel=info --concurrency=4
+    networks:
+      - ml-network
+
   grafana:
     image: grafana/grafana:latest
     ports:
@@ -169,10 +227,19 @@ services:
       PREFECT_API_URL: http://prefect-server:4200/api
       RETRAINING_DEPLOYMENT: ${RETRAINING_DEPLOYMENT}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     depends_on:
       mlflow:
         condition: service_healthy
       prefect-server:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     command: uvicorn app:app --host 0.0.0.0 --port 8000
     networks:

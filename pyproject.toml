@@ -26,4 +26,5 @@ dependencies = [
     "shap>=0.51.0",
     "db-dtypes>=1.5.1",
     "locust>=2.43.4",
+    "celery>=5.6.3",
 ]

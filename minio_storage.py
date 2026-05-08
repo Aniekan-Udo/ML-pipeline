@@ -169,6 +169,9 @@ def model_key(name: str) -> str:
 def preprocessor_key() -> str:
     return "preprocessor/preprocessor.pkl"
 
+def clip_boundary_key() -> str:
+    return "clip_boundary/clip_boundary.pkl"
+
 
 # ─────────────────────────────────────────────
 # MODULE-LEVEL API

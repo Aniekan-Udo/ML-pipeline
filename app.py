@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from inference import Inference
 from database import create_tables
+from celery_app import log_predictions          # ← Celery task
 from monitoring import (
     _run_drift_report,
     _classify_severity,
@@ -35,7 +36,6 @@ RETRAINING_DEPLOYMENT = os.getenv("RETRAINING_DEPLOYMENT")
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
 
 # ── Module-level globals ──────────────────────────────────────────────────────
-# Assigned by lifespan at startup, refreshed every 5 min by background loop
 inference             = None
 current_model_name    = None
 current_model_version = None
@@ -85,13 +85,18 @@ def get_best_model_info() -> tuple[str, str]:
 # ── Inference loader ──────────────────────────────────────────────────────────
 
 def _load_inference() -> tuple:
-    """
-    Instantiates Inference with the current production model.
-    Inference lazy loads model + preprocessor + explainer from MinIO.
-    No preprocessor injection needed — Inference owns its own loading.
-    """
     best_model_name, best_model_version = get_best_model_info()
     inf = Inference(best_model_name=best_model_name)
+    
+    # Eagerly load artifacts from MinIO to prevent cold-start latency 
+    # on the first prediction request.
+    logger.info("Eagerly loading MinIO artifacts to prevent cold start...")
+    _ = inf.model
+    _ = inf.preprocessor
+    _ = inf.explainer
+    _ = inf.clip_bounds
+    logger.info("All artifacts eagerly loaded.")
+    
     return inf, best_model_name, best_model_version
 
 
@@ -128,7 +133,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-# ── App — defined BEFORE middleware ───────────────────────────────────────────
+# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
@@ -150,35 +155,28 @@ def predict(request: PredictionRequest):
         raise HTTPException(status_code=503, detail="Model not loaded yet — try again shortly")
 
     try:
-        df = pd.DataFrame([r.dict() for r in request.data])
+        df = pd.DataFrame([r.model_dump() for r in request.data])
 
         predictions       = inference.predict(df)
         confidence_scores = inference.predict_proba(df)
-        explanation       = inference.explain(df)   # ← SHAP explanation
+        explanation       = inference.explain(df)
 
-        # ── Log predictions to DB ─────────────────────────────────────────────
+        # ── Fire and forget — DB write never blocks the response ──────────────
         try:
-            from database import get_engine, Prediction as PredictionRecord
-            from sqlalchemy.orm import Session
-
-            with Session(get_engine()) as session:
-                for txn, pred, conf in zip(request.data, predictions, confidence_scores):
-                    session.add(PredictionRecord(
-                        transaction_id=txn.transaction_id,
-                        predicted_label=int(pred),
-                        confidence_score=float(conf),
-                        model_name=current_model_name,
-                        model_version=str(current_model_version),
-                    ))
-                session.commit()
-        except Exception as db_err:
-            # DB failure must never break the prediction response
-            logger.warning(f"Failed to log predictions to DB: {db_err}")
+            log_predictions.delay(
+                transactions=[r.model_dump() for r in request.data],
+                predictions=predictions.tolist(),
+                confidence_scores=confidence_scores.tolist(),
+                model_name=current_model_name,
+                model_version=str(current_model_version),
+            )
+        except Exception as celery_err:
+            logger.warning(f"Celery task dispatch failed: {celery_err}")
 
         return {
             "prediction":    predictions.tolist(),
             "confidence":    confidence_scores.tolist(),
-            "explanation":   explanation,              
+            "explanation":   explanation,
             "model_used":    current_model_name,
             "model_version": current_model_version,
         }
@@ -196,7 +194,6 @@ def run_monitor(request: MonitorRequest):
         from preprocessing import FeatureEngineer
         from retrain_flow import get_extractor
 
-        # Load reference data
         ref_extractor = get_extractor(
             request.reference_source,
             request.postgres_config or request.bigquery_config
@@ -206,7 +203,6 @@ def run_monitor(request: MonitorRequest):
         ref_fe.cleaning()
         reference_df = ref_fe.transform()
 
-        # Load current data
         curr_extractor = get_extractor(
             request.current_source,
             request.postgres_config or request.bigquery_config
@@ -216,7 +212,6 @@ def run_monitor(request: MonitorRequest):
         curr_fe.cleaning()
         current_df = curr_fe.transform()
 
-        # Run drift report — same functions as monitoring.py
         data_dict     = _run_drift_report(reference_df, current_df)
         drift_metrics = data_dict["metrics"][0]["result"]
         share_drifted = drift_metrics["share_of_drifted_columns"]
@@ -231,7 +226,6 @@ def run_monitor(request: MonitorRequest):
             elif col == "predicted_fraud":
                 prediction_drift = detected
 
-        # Performance monitoring
         recall = None
         performance_result = {"available": False, "reason": "Not requested"}
         if request.include_performance:
@@ -267,7 +261,6 @@ def run_monitor(request: MonitorRequest):
         severity = _classify_severity(share_drifted, prediction_drift, target_drift, recall)
         retraining_recommended = severity == "serious"
 
-        # Trigger retraining if serious
         retraining_triggered = False
         if retraining_recommended:
             try:
@@ -306,10 +299,10 @@ def run_monitor(request: MonitorRequest):
 @app.get("/health")
 def health():
     return {
-        "status":                 "ok",
-        "model":                  current_model_name,
-        "model_version":          current_model_version,
-        "model_loaded":           inference is not None,
+        "status":                  "ok",
+        "model":                   current_model_name,
+        "model_version":           current_model_version,
+        "model_loaded":            inference is not None,
         "reload_interval_seconds": 300,
     }
 

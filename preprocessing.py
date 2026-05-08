@@ -34,6 +34,7 @@ raw_transaction_schema = DataFrameSchema(
             int,
             checks=Check.isin([0, 1], error="is_fraud must be 0 or 1"),
             nullable=False,
+            required=False,
         ),
     },
     coerce=True,         
@@ -133,6 +134,8 @@ class FeatureEngineer(FeatureEngineerPort):
             raise
 
     def cleaning(self, amount_col: str = 'transaction_amount') -> pd.DataFrame:
+        from minio_storage import save, clip_boundary_key
+        import mlflow
         self._validate_raw()                        
 
         self.df = self.df.drop_duplicates()
@@ -146,6 +149,13 @@ class FeatureEngineer(FeatureEngineerPort):
         lower = self.df[amount_col].quantile(0.01)
         upper = self.df[amount_col].quantile(0.99)
         self.df[amount_col] = self.df[amount_col].clip(lower, upper)
+
+        self.clip_bounds = {"lower": lower, "upper": upper}
+
+        with mlflow.start_run(run_name="clip_boundaries"):
+            uri = save(self.clip_bounds, clip_boundary_key())
+            mlflow.log_param("preprocessor_minio_uri", uri)
+            logger.info(f"Preprocessor saved to MinIO: {uri}")
         return self.df
 
     def transform(self) -> pd.DataFrame:
@@ -233,3 +243,44 @@ class Preprocessor(PreprocessorPort):
         X_train, X_test, X_val = self.preprocess()
         X_train, self.y_train = self.inbalance_handling()
         return X_train, X_test, X_val, self.y_train, self.y_test, self.y_val
+    
+
+class InferenceFeatureEngineer(FeatureEngineerPort):
+    """
+    Lightweight feature engineering for real-time inference.
+    Skips Pandera validation, quantile computation, deduplication
+    and null checks — all unnecessary for single transactions
+    already validated by Pydantic at the API layer.
+    """
+
+    def __init__(self, df: pd.DataFrame, clip_bounds: dict = None):
+        self.df = df.copy()
+        self.clip_bounds = clip_bounds
+
+    def cleaning(self, amount_col: str = 'transaction_amount') -> pd.DataFrame:
+
+        if self.clip_bounds is None:
+            from minio_storage import StorageSingleton, clip_boundary_key
+            self.clip_bounds = StorageSingleton.get().load(clip_boundary_key())
+
+        self.AMOUNT_LOWER = self.clip_bounds['lower']
+        self.AMOUNT_UPPER = self.clip_bounds['upper']
+        # Skip: validation, deduplication, dropna — not needed at inference
+        self.df.columns = [c.lower().strip() for c in self.df.columns]
+        self.df[amount_col] = self.df[amount_col].clip(
+            self.AMOUNT_LOWER, self.AMOUNT_UPPER
+        )
+        return self.df
+
+    def transform(self) -> pd.DataFrame:
+        # Skip: _validate_engineered() — Pydantic already validated input
+        self.df['log_transaction_amount'] = np.log1p(self.df['transaction_amount'])
+        self.df['transaction_time'] = pd.to_datetime(self.df['transaction_time'])
+        self.df['transaction_year']        = self.df['transaction_time'].dt.year
+        self.df['transaction_month']       = self.df['transaction_time'].dt.month
+        self.df['transaction_day']         = self.df['transaction_time'].dt.day
+        self.df['transaction_hour']        = self.df['transaction_time'].dt.hour
+        self.df['transaction_day_of_week'] = self.df['transaction_time'].dt.dayofweek
+        self.df['amount_by_device'] = self.df['transaction_amount'] * (
+            self.df['device_type'] == 'mobile').astype(int)
+        return self.df
